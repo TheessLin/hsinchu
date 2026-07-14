@@ -11,6 +11,7 @@ import VectorSource from "ol/source/Vector";
 import { Fill, Stroke, Style } from "ol/style";
 import type { StyleFunction } from "ol/style/Style";
 import View from "ol/View";
+import { apiFetch } from "./api";
 import { RenewalCandidatePage } from "./RenewalCandidatePage";
 
 type HealthResponse = {
@@ -272,7 +273,7 @@ export function App(): ReactElement {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch("/api/v1/health", { signal: controller.signal })
+    apiFetch("/api/v1/health", { signal: controller.signal })
       .then((response) => {
         if (!response.ok) {
           throw new Error(`健康檢查失敗：${response.status}`);
@@ -318,8 +319,8 @@ export function App(): ReactElement {
     candidateSourceRef.current = candidateSource;
 
     Promise.all([
-      fetch("/api/boundary", { signal: controller.signal }).then(assertJson<GeoJsonFeatureCollection>("研究範圍載入失敗")),
-      fetch("/api/grids", { signal: controller.signal }).then(assertJson<GeoJsonFeatureCollection>("分析網格載入失敗"))
+      apiFetch("/api/boundary", { signal: controller.signal }).then(assertJson<GeoJsonFeatureCollection>("研究範圍載入失敗")),
+      apiFetch("/api/grids", { signal: controller.signal }).then(assertJson<GeoJsonFeatureCollection>("分析網格載入失敗"))
     ])
       .then(([boundaryGeoJson, gridGeoJson]) => {
         const boundaryFeatures = geoJsonFormat.readFeatures(boundaryGeoJson, {
@@ -434,7 +435,7 @@ export function App(): ReactElement {
     setIsGenerating(true);
     try {
       if (regenerate) {
-        const generateResponse = await fetch("/api/simulation/generate", {
+        const generateResponse = await apiFetch("/api/simulation/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ seed })
@@ -444,7 +445,7 @@ export function App(): ReactElement {
         }
       }
 
-      const [resilienceResponse, candidatesResponse] = await Promise.all([fetch("/api/resilience"), fetch("/api/candidates")]);
+      const [resilienceResponse, candidatesResponse] = await Promise.all([apiFetch("/api/resilience"), apiFetch("/api/candidates")]);
       if (!resilienceResponse.ok) {
         throw new Error(`韌性評分載入失敗：${resilienceResponse.status}`);
       }

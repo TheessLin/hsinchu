@@ -141,6 +141,44 @@ http://127.0.0.1:5173
 
 The Vite dev server proxies `/api` requests to `http://127.0.0.1:8000`.
 
+## GitHub Pages Static Demo
+
+GitHub Pages can host only static frontend files. It cannot run the FastAPI backend. This project therefore supports a static demo mode for sharing:
+
+* backend-generated data is exported to `frontend/public/demo-data`
+* the frontend reads those JSON and GeoJSON files when `VITE_STATIC_DEMO=1`
+* local development still uses the FastAPI `/api` endpoints
+
+Generate static demo data:
+
+```powershell
+cd D:\forclaude\hsinchu-urban-resilience-poc
+python scripts\export_static_demo.py
+```
+
+Build the Pages version locally:
+
+```powershell
+cd D:\forclaude\hsinchu-urban-resilience-poc\frontend
+$env:VITE_STATIC_DEMO="1"
+$env:VITE_BASE_PATH="/"
+pnpm build
+pnpm preview
+```
+
+Deploy to GitHub Pages:
+
+1. Push this repository to GitHub on the `main` branch.
+2. In GitHub, open **Settings > Pages**.
+3. Set the Pages source to **GitHub Actions**.
+4. The workflow at `.github/workflows/deploy-pages.yml` will build and deploy the static demo.
+
+Known static-demo limits:
+
+* The shared Pages site is a fixed snapshot generated from seed `42`.
+* The "重新模擬" button reloads the static snapshot instead of recalculating on a backend.
+* Exports and future scenario simulation features need either static-file equivalents or a hosted backend.
+
 ## Tests
 
 Run backend tests from the repository root:

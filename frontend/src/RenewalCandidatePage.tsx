@@ -6,6 +6,7 @@ import OlMap from "ol/Map";
 import VectorSource from "ol/source/Vector";
 import { Fill, Stroke, Style } from "ol/style";
 import View from "ol/View";
+import { apiFetch } from "./api";
 
 type Phase2CandidateDetail = {
   phase1_data_version: string;
@@ -66,7 +67,7 @@ export function RenewalCandidatePage({
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-    fetch(`/api/v1/phase2/candidates/${encodeURIComponent(candidateId)}`, { signal: controller.signal })
+    apiFetch(`/api/v1/phase2/candidates/${encodeURIComponent(candidateId)}`, { signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) {
           throw new Error(response.status === 404 ? UI.notFound : `${UI.notFound}: ${response.status}`);
