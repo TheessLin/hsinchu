@@ -1483,16 +1483,24 @@ function radarOption(payload: KpiPayload | null): echarts.EChartsOption {
 function beforeAfterOption(payload: KpiPayload | null): echarts.EChartsOption {
   const selected = ["resilience_score", "green_ratio", "parking_supply", "commercial_activity_score"];
   const labels = selected.map((id) => payload?.kpis[id]?.name ?? id);
+  const beforeData = selected.map((id) => indexedKpiData(payload?.kpis[id], "baseline"));
+  const afterData = selected.map((id) => indexedKpiData(payload?.kpis[id], "value"));
+  const yMax = Math.max(120, ...beforeData.map((item) => item.value), ...afterData.map((item) => item.value)) * 1.12;
   return {
-    grid: { left: 42, right: 8, top: 24, bottom: 42 },
+    grid: { left: 48, right: 12, top: 32, bottom: 48 },
     legend: { top: 0 },
     xAxis: { type: "category", data: labels, axisLabel: { rotate: 18, fontSize: 10 } },
-    yAxis: { type: "value" },
+    yAxis: {
+      type: "value",
+      name: "現況=100",
+      max: Math.ceil(yMax / 10) * 10,
+      axisLabel: { formatter: "{value}" },
+    },
     series: [
-      { name: "Before", type: "bar", data: selected.map((id) => scaledKpi(payload?.kpis[id], "baseline")) },
-      { name: "After", type: "bar", data: selected.map((id) => scaledKpi(payload?.kpis[id], "value")) },
+      { name: "Before", type: "bar", data: beforeData, barMaxWidth: 24 },
+      { name: "After", type: "bar", data: afterData, barMaxWidth: 24 },
     ],
-    tooltip: { trigger: "axis" },
+    tooltip: { trigger: "axis", formatter: formatIndexedTooltip },
   };
 }
 
@@ -1507,15 +1515,42 @@ function averageKpis(kpis: Record<string, KpiRecord> | undefined, ids: string[],
   return Math.min(100, (values.reduce((sum, value) => sum + value * multiplier, 0) / values.length));
 }
 
-function scaledKpi(kpi: KpiRecord | undefined, field: "value" | "baseline"): number {
-  const value = field === "value" ? kpi?.value : kpi?.baseline_value;
-  if (typeof value !== "number") {
-    return 0;
+function indexedKpiData(
+  kpi: KpiRecord | undefined,
+  field: "value" | "baseline"
+): { value: number; rawLabel: string; changeLabel: string } {
+  const rawValue = field === "value" ? kpi?.value : kpi?.baseline_value;
+  const baseline = kpi?.baseline_value;
+  if (!kpi || typeof rawValue !== "number" || typeof baseline !== "number") {
+    return { value: 0, rawLabel: "資料不足", changeLabel: "" };
   }
-  if (kpi?.unit === "比例") {
-    return value * 100;
-  }
-  return value;
+  const indexedValue = baseline === 0 ? (rawValue === 0 ? 100 : 0) : (rawValue / baseline) * 100;
+  return {
+    value: Number.isFinite(indexedValue) ? Number(indexedValue.toFixed(1)) : 0,
+    rawLabel: formatRawKpiValue(rawValue, kpi.unit),
+    changeLabel: field === "value" ? formatSigned(kpi.absolute_change, kpi.unit) : "基準值",
+  };
+}
+
+type IndexedTooltipParam = {
+  axisValueLabel?: string;
+  marker?: string;
+  seriesName?: string;
+  data?: { value?: number; rawLabel?: string; changeLabel?: string };
+};
+
+function formatIndexedTooltip(params: unknown): string {
+  const items = (Array.isArray(params) ? params : [params]) as IndexedTooltipParam[];
+  const title = items[0]?.axisValueLabel ?? "";
+  const rows = items
+    .map((item) => {
+      const value = typeof item.data?.value === "number" ? item.data.value.toFixed(1) : "-";
+      const raw = item.data?.rawLabel ?? "-";
+      const change = item.data?.changeLabel ? `，${item.data.changeLabel}` : "";
+      return `${item.marker ?? ""}${item.seriesName ?? ""}: 指數 ${value}；原始值 ${raw}${change}`;
+    })
+    .join("<br/>");
+  return `<strong>${title}</strong><br/>${rows}<br/><span style="color:#64748b">柱高為相對現況指數，避免不同單位量級互相壓縮。</span>`;
 }
 
 function rankedKpiChanges(records: KpiRecord[], direction: "positive" | "negative"): KpiRecord[] {
