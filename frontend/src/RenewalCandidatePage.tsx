@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import type { CSSProperties, ReactElement } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as echarts from "echarts";
 import * as THREE from "three";
@@ -795,6 +795,7 @@ export function RenewalCandidatePage({
                 selectedBuildingId={selectedBuilding?.building_id ?? null}
               />
             ) : null}
+            <MapLegendOverlay />
             {(initialLoading || simulating) && <MapNotice>{initialLoading ? "讀取 R-01 資料中" : "重新模擬中"}</MapNotice>}
           </div>
         </section>
@@ -1135,6 +1136,82 @@ function ModeButton({ active, label, onClick }: { active: boolean; label: string
 
 function MapNotice({ children }: { children: string }): ReactElement {
   return <div className="absolute left-4 top-4 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm">{children}</div>;
+}
+
+function MapLegendOverlay(): ReactElement {
+  return (
+    <div className="pointer-events-none absolute bottom-4 left-4 max-w-[260px] rounded-md border border-slate-200 bg-white/95 p-3 text-xs text-slate-700 shadow-sm backdrop-blur">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <h3 className="font-semibold text-slate-800">圖例</h3>
+        <span className="text-[11px] text-slate-500">2D／3D 共用</span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+        <LegendSection title="範圍與線型">
+          <LegendLine color="#be123c" label="R-01範圍" width={3} />
+          <LegendFill fill="rgba(226, 232, 240, 0.45)" label="街廓" stroke="rgba(71, 85, 105, 0.72)" />
+          <LegendLine color="#64748b" label="道路" width={2} />
+        </LegendSection>
+
+        <LegendSection title="建物狀態">
+          <LegendFill fill="rgba(100, 116, 139, 0.72)" label="現況建物" />
+          <LegendFill fill="rgba(37, 99, 235, 0.72)" label="保留建物" />
+          <LegendFill fill="rgba(22, 163, 74, 0.72)" label="新增建物" />
+          <LegendFill fill="rgba(220, 38, 38, 0.22)" label="移除建物" stroke="#991b1b" />
+        </LegendSection>
+
+        <LegendSection title="生活與開放空間">
+          <LegendDot color="#16a34a" label="公園" />
+          <LegendDot color="#65a30d" label="開放空間" />
+          <LegendDot color="#2563eb" label="停車設施" />
+          <LegendDot color="#ca8a04" label="市場" />
+        </LegendSection>
+
+        <LegendSection title="交通與防災服務">
+          <LegendDot color="#f97316" label="公車站" />
+          <LegendDot color="#0891b2" label="自行車站" />
+          <LegendDot color="#dc2626" label="避難／防災" />
+          <LegendDot color="#9333ea" label="醫療照護" />
+        </LegendSection>
+      </div>
+    </div>
+  );
+}
+
+function LegendSection({ children, title }: { children: ReactElement | ReactElement[]; title: string }): ReactElement {
+  return (
+    <div>
+      <h4 className="mb-1 text-[11px] font-semibold text-slate-500">{title}</h4>
+      <div className="space-y-1">{children}</div>
+    </div>
+  );
+}
+
+function LegendLine({ color, label, width }: { color: string; label: string; width: number }): ReactElement {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="h-3 w-5 rounded-sm" style={{ borderTop: `${width}px solid ${color}` }} />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function LegendFill({ fill, label, stroke = "rgba(71, 85, 105, 0.72)" }: { fill: string; label: string; stroke?: string }): ReactElement {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="h-3 w-5 rounded-sm border" style={{ backgroundColor: fill, borderColor: stroke } satisfies CSSProperties} />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function LegendDot({ color, label }: { color: string; label: string }): ReactElement {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="h-2.5 w-2.5 rounded-full border border-white shadow-sm" style={{ backgroundColor: color }} />
+      <span>{label}</span>
+    </div>
+  );
 }
 
 function EChart({ className, option }: { className: string; option: echarts.EChartsOption }): ReactElement {
