@@ -1,0 +1,1650 @@
+# 新竹市都市韌性健康度模擬平台
+## 第二階段系統開發規格（R-01都市更新情境模擬POC）
+
+> 本階段為約3週可完成之概念驗證。所有資料均為Synthetic Data，結果不得作為正式都市更新、建築配置、交通、災害工程或政策判定依據。
+
+---
+
+# 1. 第二階段目標
+
+## 1.1 核心目標
+
+以第一階段篩選出的候選區 `R-01` 為示範基地，建立一套小範圍、規則式、可重現的都市更新情境模擬功能，驗證下列能力：
+
+1. 由第一階段候選區資料建立R-01現況模型。
+2. 產生建物、街廓、道路、公園、停車及POI等Synthetic Geometry。
+3. 建立Scenario 0、A、B、C四種情境。
+4. 依情境參數重新產生空間配置與KPI。
+5. 比較更新前後人口、停車、交通、綠地、避難、消防及生活機能差異。
+6. 以2D圖台與LOD1建物擠出呈現更新前後差異。
+7. 將計算結果整理為AI可讀的結構化摘要，由AI負責解釋，不負責計算正式數值。
+8. 匯出Scenario JSON、GeoJSON及KPI CSV。
+
+## 1.2 POC範圍
+
+- 候選區：R-01。
+- 面積：0.3～0.8平方公里。
+- 街廓：4～8個。
+- 建物：50～150棟。
+- 情境：Scenario 0、A、B、C。
+- 建物模型：LOD1方塊擠出。
+- 資料儲存：GeoJSON、JSON、CSV。
+- 執行方式：單機開發環境或Docker Compose。
+
+## 1.3 不納入範圍
+
+- 正式都市設計方案。
+- 真實土地權利與所有權人資料。
+- 都市計畫、容積移轉或權利變換法定計算。
+- BIM、LOD2以上建物模型。
+- 真實交通指派與微觀模擬。
+- CFD、淹水、耐震或消防工程模擬。
+- 正式財務可行性分析。
+- 正式都市更新政策建議。
+
+## 1.4 驗收重點
+
+- 可由第一階段R-01入口進入第二階段。
+- 可顯示現況建物、道路、街廓、公園、停車與POI。
+- 可切換Scenario 0、A、B、C。
+- 調整參數後可重算KPI。
+- 2D與LOD1場景同步更新。
+- 可完成前後比較及匯出。
+- 相同Scenario與Seed得到相同結果。
+
+---
+
+# 2. 與第一階段的資料銜接方式
+
+## 2.1 第一階段輸入
+
+第二階段直接讀取第一階段產出的候選區資料：
+
+- `candidate_areas.geojson`
+- `resilience_grid.geojson`
+- `weights.json`
+- `indicator_rules.json`
+- R-01網格清單
+- R-01六大構面分數
+- R-01主要弱項
+- R-01更新潛力分數
+
+## 2.2 R-01識別方式
+
+第一階段候選區Feature需至少包含：
+
+```json
+{
+  "candidate_id": "R-01",
+  "grid_ids": ["GRID_001", "GRID_002"],
+  "area_m2": 520000,
+  "avg_health_score": 43.8,
+  "avg_renewal_potential": 78.2,
+  "major_weaknesses": [
+    "built_environment",
+    "hazard_evacuation",
+    "living_health"
+  ]
+}
+```
+
+## 2.3 銜接處理流程
+
+```text
+讀取candidate_areas.geojson
+  ↓
+取得candidate_id = R-01
+  ↓
+取得R-01 geometry與grid_ids
+  ↓
+裁切第一階段網格資料
+  ↓
+建立R-01局部座標與街廓骨架
+  ↓
+依都市類型與弱項產生現況Synthetic Data
+  ↓
+建立Scenario 0基準資料
+```
+
+## 2.4 資料版本欄位
+
+所有第二階段資料需記錄：
+
+```json
+{
+  "phase1_data_version": "0.1.0",
+  "phase2_data_version": "0.1.0",
+  "candidate_id": "R-01",
+  "seed": 42,
+  "generated_at": "ISO-8601 datetime"
+}
+```
+
+## 2.5 銜接限制
+
+- 若第一階段沒有真實R-01幾何，使用候選區群聚Polygon作為模擬範圍。
+- 第二階段不得修改第一階段原始網格分數。
+- 第二階段新增之KPI與情境資料應獨立存放。
+
+---
+
+# 3. R-01現況Synthetic Data設計
+
+## 3.1 設計原則
+
+R-01現況資料不得以無條件亂數生成，需由以下條件共同決定：
+
+```text
+現況值 =
+第一階段弱項特徵
++ R-01都市類型基準
++ 街廓位置修正
++ 道路階層修正
++ 建物用途修正
++ 受控隨機誤差
+```
+
+## 3.2 合理預設
+
+若第一階段未提供更細緻資訊，R-01預設為：
+
+- 老舊住宅與混合使用為主。
+- 6個街廓。
+- 90棟建物。
+- 主要道路1～2條。
+- 次要道路4～8條。
+- 現況公園或開放空間不足。
+- 停車供需偏緊。
+- 公共運輸可及性中等。
+- 建物屋齡偏高。
+- 消防救援可及性偏低。
+
+## 3.3 現況資料生成步驟
+
+1. 將R-01 Polygon轉為公尺制座標。
+2. 產生主要道路與次要道路骨架。
+3. 依道路切分4～8個街廓。
+4. 在街廓內產生建築基地。
+5. 生成50～150棟建物Footprint。
+6. 依用途分配住宅、商業、混合、公共設施。
+7. 產生公園、停車及POI。
+8. 計算人口、戶數、樓地板面積及停車需求。
+9. 計算Scenario 0 KPI。
+10. 輸出GeoJSON、Scenario JSON與KPI CSV。
+
+## 3.4 建物現況生成規則
+
+老舊住宅建物：
+
+- 3～6層為主。
+- 屋齡25～55年。
+- 建蔽率偏高。
+- 退縮較少。
+- 每戶樓地板面積較小。
+- 停車供給不足。
+
+主要道路沿線混合使用建物：
+
+- 4～10層。
+- 1～2樓為商業機率較高。
+- 日間人口與商業活力較高。
+- 人行空間壓力較高。
+
+公共設施：
+
+- 數量少。
+- 服務半徑以簡化距離計算。
+- 可包含診所、托育、長照、活動中心。
+
+## 3.5 重現性
+
+所有生成函式需接受：
+
+```python
+seed: int
+candidate_id: str
+scenario_id: str
+```
+
+相同輸入必須產生相同幾何及屬性。
+
+---
+
+# 4. 建物、街廓、道路及設施資料Schema
+
+## 4.1 Building Schema
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| building_id | string | 建物編號 |
+| block_id | string | 所屬街廓 |
+| scenario_id | string | 情境編號 |
+| use_type | enum | residential/commercial/mixed/public/parking |
+| footprint_m2 | number | 建築面積 |
+| floors | integer | 樓層數 |
+| height_m | number | LOD1高度 |
+| floor_area_m2 | number | 總樓地板面積 |
+| residential_floor_area_m2 | number | 住宅樓地板面積 |
+| commercial_floor_area_m2 | number | 商業樓地板面積 |
+| dwelling_units | integer | 住宅戶數 |
+| residents | integer | 常住人口 |
+| daytime_population | integer | 日間人口 |
+| building_age | number | 屋齡 |
+| structural_condition | number | 0～100 |
+| parking_spaces | integer | 建物停車位 |
+| green_roof_ratio | number | 0～1 |
+| permeable_ratio | number | 0～1 |
+| source_building_ids | array | 更新前對應建物 |
+| geometry | Polygon | 建物Footprint |
+
+高度簡化公式：
+
+```text
+height_m = floors × floor_height_m
+```
+
+住宅樓高預設3.2公尺，商業樓高預設3.8公尺。
+
+## 4.2 Block Schema
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| block_id | string | 街廓編號 |
+| scenario_id | string | 情境編號 |
+| area_m2 | number | 街廓面積 |
+| building_count | integer | 建物數 |
+| building_coverage_ratio | number | 建蔽率 |
+| floor_area_ratio | number | 模擬容積率 |
+| open_space_ratio | number | 開放空間比例 |
+| green_coverage_ratio | number | 綠覆率 |
+| permeable_ratio | number | 透水比例 |
+| dominant_use | string | 主要用途 |
+| population | integer | 常住人口 |
+| geometry | Polygon | 街廓範圍 |
+
+## 4.3 Road Schema
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| road_id | string | 道路編號 |
+| scenario_id | string | 情境編號 |
+| road_class | enum | primary/secondary/local/pedestrian |
+| width_m | number | 道路寬度 |
+| carriageway_width_m | number | 車道寬度 |
+| sidewalk_width_m | number | 人行道寬度 |
+| bike_lane | boolean | 是否設自行車設施 |
+| tree_shade_ratio | number | 遮蔭比例 |
+| emergency_access | boolean | 是否可作救災通道 |
+| transit_route | boolean | 是否有公車路線 |
+| geometry | LineString | 道路中心線 |
+
+## 4.4 Park/Open Space Schema
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| facility_id | string | 設施編號 |
+| facility_type | enum | park/plaza/playground/shelter |
+| scenario_id | string | 情境編號 |
+| area_m2 | number | 面積 |
+| green_ratio | number | 綠覆比例 |
+| permeable_ratio | number | 透水比例 |
+| shade_ratio | number | 遮蔭比例 |
+| shelter_capacity | integer | 避難容量 |
+| geometry | Polygon | 設施範圍 |
+
+## 4.5 Parking Schema
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| parking_id | string | 停車設施編號 |
+| parking_type | enum | surface/underground/shared/on_street |
+| scenario_id | string | 情境編號 |
+| spaces | integer | 車位數 |
+| shared_ratio | number | 共享比例 |
+| geometry | Point或Polygon | 位置或範圍 |
+
+## 4.6 POI Schema
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| poi_id | string | POI編號 |
+| poi_type | enum | clinic/eldercare/childcare/retail/market/community/transit |
+| scenario_id | string | 情境編號 |
+| capacity | integer | 模擬服務容量 |
+| service_radius_m | number | 服務半徑 |
+| daily_visitors | integer | 日間使用人口 |
+| geometry | Point | 位置 |
+
+---
+
+# 5. Scenario 0、A、B、C詳細定義
+
+## 5.1 Scenario 0｜現況
+
+### 目標
+
+保留R-01現況Synthetic Data，作為比較基準。
+
+### 規則
+
+- 不拆除或新增建物。
+- 使用現況人口與戶數。
+- 保留現況道路、公園、停車及POI。
+- 計算現況14項KPI。
+- 所有比較值的Delta均以Scenario 0為基準。
+
+## 5.2 Scenario A｜住宅導向更新
+
+### 目標
+
+增加住宅供給與地下停車，建立中高層住宅及基本開放空間。
+
+### 規則
+
+- 選擇部分老舊建物所在街廓更新。
+- 建物樓層提高至8～18層。
+- 住宅樓地板面積提高。
+- 新增地下停車。
+- 設定最低開放空間比例。
+- 商業比例維持低至中等。
+- 常住人口與住宅戶數明顯增加。
+- 綠覆與避難改善有限。
+
+### 主要預期
+
+- 住宅戶數上升。
+- 常住人口上升。
+- 停車供給增加。
+- 建物平均屋齡降低。
+- 公園與防災改善不一定顯著。
+
+## 5.3 Scenario B｜韌性導向更新
+
+### 目標
+
+優先改善公園、防災廣場、消防動線、綠覆、遮蔭、透水空間及高齡幼兒服務。
+
+### 規則
+
+- 降低部分街廓建築密度。
+- 增加公園、防災廣場及避難容量。
+- 拓寬或清理消防救災通道。
+- 提高人行道遮蔭率。
+- 提高綠覆率與透水比例。
+- 新增高齡、幼兒或社區服務POI。
+- 住宅增量低於Scenario A。
+
+### 主要預期
+
+- 綠覆率與開放空間比例上升。
+- 公園與避難場所服務人口上升。
+- 消防救援可及性提升。
+- 都市韌性健康度提升幅度較高。
+
+## 5.4 Scenario C｜交通與商圈導向更新
+
+### 目標
+
+增加混合使用、商業樓地板、人行空間、公車與自行車設施、共享停車及日間活動人口。
+
+### 規則
+
+- 主要道路沿線增加混合使用建物。
+- 增加商業樓地板面積。
+- 拓寬人行道。
+- 新增公車站或提高公車服務指數。
+- 新增自行車設施。
+- 導入共享停車。
+- 提高日間人口與商業活力。
+- 控制住宅增量於中等程度。
+
+### 主要預期
+
+- 日間人口上升。
+- 公共運輸與步行可及性提升。
+- 商業活力提升。
+- 尖峰活動與停車需求可能增加。
+
+---
+
+# 6. 可調整的Scenario參數
+
+POC僅提供有限且可解釋的參數，避免形成專業都市設計工具。
+
+## 6.1 共通參數
+
+| 參數 | 範圍 | 預設 |
+|---|---:|---:|
+| seed | 1～99999 | 42 |
+| selected_block_ratio | 0.2～1.0 | 0.5 |
+| demolition_ratio | 0～1 | 0.5 |
+| target_floor_height_m | 3～4 | 3.2 |
+| population_per_unit | 1.5～4 | 2.4 |
+| parking_demand_per_unit | 0.3～1.5 | 0.8 |
+
+## 6.2 Scenario A參數
+
+- `target_residential_floors`: 8～18。
+- `residential_floor_area_ratio`: 0.6～0.95。
+- `underground_parking_per_unit`: 0.5～1.5。
+- `minimum_open_space_ratio`: 0.15～0.35。
+- `commercial_ground_floor_ratio`: 0～0.25。
+
+## 6.3 Scenario B參數
+
+- `park_area_ratio`: 0.05～0.25。
+- `disaster_plaza_area_m2`: 0～10000。
+- `green_coverage_target`: 0.20～0.60。
+- `permeable_ratio_target`: 0.20～0.70。
+- `sidewalk_shade_target`: 0.20～0.80。
+- `emergency_road_min_width_m`: 6～12。
+- `eldercare_facilities`: 0～3。
+- `childcare_facilities`: 0～3。
+
+## 6.4 Scenario C參數
+
+- `mixed_use_ratio`: 0.2～0.8。
+- `commercial_floor_area_ratio`: 0.15～0.60。
+- `sidewalk_width_target_m`: 2～6。
+- `new_transit_stops`: 0～4。
+- `bike_lane_length_m`: 0～3000。
+- `shared_parking_ratio`: 0～0.8。
+- `daytime_population_multiplier`: 1.0～2.5。
+
+## 6.5 參數驗證
+
+- 所有參數需由Pydantic驗證。
+- 超出範圍回傳HTTP 422。
+- 不允許前端直接覆寫KPI。
+- 所有參數變更需記錄於`assumption_log`。
+
+---
+
+# 7. KPI清單及計算公式
+
+所有KPI均由後端計算。AI只接收後端完成的數值與差異。
+
+## 7.1 常住人口
+
+```text
+Resident Population = Σ building.residents
+```
+
+建物人口：
+
+```text
+residents = dwelling_units × population_per_unit
+```
+
+## 7.2 日間人口
+
+```text
+Daytime Population =
+住宅日間人口
++ 商業就業人口
++ POI日間訪客
+```
+
+簡化公式：
+
+```text
+住宅日間人口 = residents × residential_daytime_ratio
+商業就業人口 = commercial_floor_area_m2 / floor_area_per_worker
+```
+
+## 7.3 住宅戶數
+
+```text
+Dwelling Units = Σ building.dwelling_units
+```
+
+## 7.4 停車供需差
+
+```text
+Parking Supply =
+建物停車
++ 公共停車
++ 有效共享停車
++ 模擬路邊停車
+```
+
+```text
+Parking Demand =
+住宅戶數 × 每戶停車需求
++ 商業樓地板面積 / 每車位服務面積
+```
+
+```text
+Parking Gap = Parking Supply - Parking Demand
+```
+
+## 7.5 公共運輸可及性
+
+對每個建物計算最近公車站距離：
+
+```text
+Building Transit Score = max(0, 100 × (1 - distance / 800))
+```
+
+區域分數：
+
+```text
+Transit Accessibility =
+Σ(Building Transit Score × building population) / total population
+```
+
+## 7.6 步行可及性
+
+```text
+Walkability =
+0.30 × sidewalk_width_score
++ 0.20 × road_connectivity_score
++ 0.20 × shade_score
++ 0.15 × pedestrian_facility_score
++ 0.15 × poi_proximity_score
+```
+
+## 7.7 公園服務人口
+
+```text
+Park Served Population =
+Σ population of buildings whose centroid is within park service radius
+```
+
+預設公園服務半徑：400公尺。
+
+同一人口不得重複累計。
+
+## 7.8 避難場所服務人口
+
+```text
+Shelter Served Population =
+min(
+  service-area population,
+  total shelter capacity
+)
+```
+
+## 7.9 綠覆率
+
+```text
+Green Coverage Ratio =
+Total simulated green area / R-01 land area
+```
+
+包含：
+
+- 公園綠地。
+- 街道植栽模擬面積。
+- 建築基地綠化。
+- 綠屋頂折算面積。
+
+## 7.10 開放空間比例
+
+```text
+Open Space Ratio =
+Total accessible open-space area / R-01 land area
+```
+
+不包含封閉式私人屋頂。
+
+## 7.11 消防救援可及性
+
+```text
+Fire Rescue Accessibility =
+0.40 × emergency_road_coverage
++ 0.30 × road_width_score
++ 0.20 × building_setback_score
++ 0.10 × route_connectivity_score
+```
+
+## 7.12 商業活力
+
+```text
+Commercial Vitality =
+0.35 × normalized commercial floor area
++ 0.25 × normalized daytime population
++ 0.20 × mixed-use intensity
++ 0.20 × pedestrian accessibility
+```
+
+## 7.13 都市韌性健康度
+
+第二階段仍使用第一階段六構面權重，但指標由R-01細部資料重新聚合。
+
+```text
+Resilience Health =
+0.25 × BE
++ 0.20 × HE
++ 0.15 × TA
++ 0.15 × SD
++ 0.15 × LH
++ 0.10 × RP
+```
+
+第二階段不得在前端重寫此公式。
+
+## 7.14 更新機會分數
+
+```text
+Renewal Opportunity =
+0.30 × existing condition deficit
++ 0.20 × improvement potential
++ 0.15 × land reconfiguration feasibility
++ 0.15 × infrastructure improvement potential
++ 0.10 × strategic location
++ 0.10 × scenario KPI gain
+```
+
+此分數是POC排序值，不是法定更新評估。
+
+## 7.15 KPI輸出共同欄位
+
+```json
+{
+  "kpi_id": "green_coverage_ratio",
+  "name": "綠覆率",
+  "unit": "%",
+  "baseline_value": 18.2,
+  "scenario_value": 31.5,
+  "absolute_delta": 13.3,
+  "percentage_delta": 73.08,
+  "direction": "higher_is_better",
+  "status": "improved"
+}
+```
+
+---
+
+# 8. 更新前後比較邏輯
+
+## 8.1 比較基準
+
+- Scenario 0固定為Baseline。
+- A、B、C均與Scenario 0比較。
+- 允許A、B、C兩兩比較，但不取代Baseline比較。
+
+## 8.2 數值差異
+
+```text
+Absolute Delta = Proposed - Baseline
+```
+
+```text
+Percentage Delta =
+(Proposed - Baseline) / abs(Baseline) × 100
+```
+
+Baseline為0時：
+
+- 不計算百分比。
+- 回傳`percentage_delta = null`。
+
+## 8.3 改善判定
+
+依KPI方向判定：
+
+- `higher_is_better`
+- `lower_is_better`
+- `target_range`
+
+例如停車供需差以接近0或正值為較佳，不直接認定越高越好。
+
+## 8.4 幾何比較
+
+前端需支援：
+
+- Scenario 0與目標情境切換。
+- 左右並排比較。
+- Swipe或透明度比較可列為選配。
+- 新增建物、拆除建物與保留建物使用不同樣式。
+
+## 8.5 追溯資料
+
+每次重算需產生：
+
+```json
+{
+  "run_id": "RUN_A_20260714_001",
+  "scenario_id": "A",
+  "seed": 42,
+  "parameter_hash": "sha256...",
+  "parameters": {},
+  "assumption_log": [],
+  "created_at": "ISO-8601"
+}
+```
+
+---
+
+# 9. 2D圖台功能
+
+## 9.1 圖層
+
+- R-01範圍。
+- 街廓。
+- 建物Footprint。
+- 道路。
+- 公園及開放空間。
+- 停車設施。
+- POI。
+- Scenario差異圖層。
+
+## 9.2 操作功能
+
+1. Scenario切換。
+2. 圖層開關。
+3. 點擊建物查看屬性。
+4. 點擊街廓查看聚合KPI。
+5. 顯示更新、拆除、新增狀態。
+6. 查看公園、避難及POI服務半徑。
+7. 候選街廓高亮。
+8. 地圖定位與縮放。
+9. GeoJSON匯出。
+
+## 9.3 2D樣式
+
+- 保留建物：中性灰。
+- 拆除建物：紅色斜線或低透明度。
+- 新增住宅：藍色系。
+- 韌性設施：綠色系。
+- 商業／混合使用：橘色系。
+
+實際色碼集中於前端Style設定檔。
+
+## 9.4 驗收條件
+
+- Scenario切換後圖層同步更新。
+- 建物數與後端回傳一致。
+- 圖層開關不重複新增Layer。
+- 點擊Feature顯示正確Scenario資料。
+
+---
+
+# 10. 2.5D或3D場景功能
+
+## 10.1 技術選擇
+
+優先使用OpenLayers既有圖台搭配WebGL或相容擴充方式完成LOD1擠出。
+
+不得為POC強制導入Cesium，除非既有專案已使用。
+
+## 10.2 LOD1定義
+
+- 建物以Footprint直接垂直擠出。
+- 不建立屋頂造型。
+- 不建立立面材質。
+- 不處理室內空間。
+- 高度由`height_m`控制。
+
+## 10.3 功能
+
+- 2D／2.5D切換。
+- 場景旋轉與傾斜。
+- Scenario切換。
+- 點擊建物查看高度、樓層、用途、戶數。
+- 更新前後場景切換。
+- 依用途或更新狀態著色。
+
+## 10.4 效能限制
+
+- 建物數控制在150棟內。
+- 僅載入R-01場景。
+- 不使用高解析材質。
+- 不顯示全市3D建物。
+
+## 10.5 降級方案
+
+若OpenLayers擠出實作時間不足，可採：
+
+- MapLibre GL JS作為獨立的R-01 2.5D View。
+- 與OpenLayers共用同一份GeoJSON及Scenario狀態。
+
+不可同時建立兩套後端計算邏輯。
+
+---
+
+# 11. AI Decision Summary輸入與輸出格式
+
+## 11.1 原則
+
+- AI不得自行計算KPI。
+- AI不得新增模型沒有提供的數值。
+- AI只解釋後端已計算的結構化結果。
+- AI輸出需標示Synthetic Data與POC限制。
+- AI摘要可先以規則模板完成，語言模型介接列為可替換服務。
+
+## 11.2 AI輸入格式
+
+```json
+{
+  "candidate_id": "R-01",
+  "baseline_scenario": "0",
+  "target_scenario": "B",
+  "scenario_name": "韌性導向更新",
+  "parameters": {},
+  "baseline_kpis": {},
+  "target_kpis": {},
+  "kpi_deltas": [],
+  "dimension_scores": {
+    "baseline": {},
+    "target": {}
+  },
+  "tradeoffs": [
+    {
+      "topic": "住宅戶數",
+      "status": "decreased",
+      "evidence_kpi_ids": ["dwelling_units"]
+    }
+  ],
+  "assumptions": [],
+  "limitations": [],
+  "data_type": "synthetic"
+}
+```
+
+## 11.3 AI輸出格式
+
+```json
+{
+  "headline": "Scenario B整體提升韌性，但住宅增量有限",
+  "executive_summary": "...",
+  "key_improvements": [
+    {
+      "title": "綠覆與開放空間提升",
+      "evidence_kpi_ids": [
+        "green_coverage_ratio",
+        "open_space_ratio"
+      ]
+    }
+  ],
+  "key_tradeoffs": [],
+  "recommended_use_case": "適合以環境及防災改善為優先的示範情境",
+  "comparison_notes": [],
+  "disclaimer": "本摘要使用合成資料與規則模型產生，不得作為正式政策判定。"
+}
+```
+
+## 11.4 驗證規則
+
+- `evidence_kpi_ids`必須存在於輸入。
+- AI文字中出現的數值需能在輸入資料找到。
+- 無法驗證的數值應移除或標記。
+- AI服務失敗時回傳規則式摘要。
+
+---
+
+# 12. 前端頁面架構
+
+## 12.1 路由
+
+```text
+/
+├── phase1/dashboard
+└── phase2/r-01
+    ├── overview
+    ├── compare
+    └── export
+```
+
+POC可實作成單頁並以Tab切換。
+
+## 12.2 頁面配置
+
+### 頂部列
+
+- 返回第一階段。
+- R-01名稱與Synthetic Data標示。
+- Scenario切換。
+- 2D／2.5D切換。
+- 重新計算。
+- 匯出。
+
+### 左側參數面板
+
+- Scenario說明。
+- 可調參數。
+- 恢復預設值。
+- 執行模擬按鈕。
+
+### 中央場景
+
+- 2D OpenLayers圖台。
+- 2.5D LOD1建物場景。
+- 圖層控制。
+- 圖例。
+
+### 右側KPI面板
+
+- 14項KPI卡片。
+- KPI變化值。
+- 雷達圖。
+- 長條比較圖。
+- AI摘要。
+
+### 比較Tab
+
+- Baseline與Target選擇。
+- KPI比較表。
+- 前後場景並排。
+- Trade-off提示。
+
+### 匯出Tab
+
+- Scenario JSON。
+- Buildings GeoJSON。
+- Roads GeoJSON。
+- Facilities GeoJSON。
+- KPI CSV。
+- AI Summary JSON。
+
+## 12.3 前端狀態
+
+建議使用Zustand：
+
+```text
+phase2Store
+├── candidate
+├── activeScenario
+├── baselineScenario
+├── scenarioParameters
+├── geometryLayers
+├── kpis
+├── comparison
+├── aiSummary
+└── loading/error
+```
+
+---
+
+# 13. 後端API清單
+
+API前綴：
+
+```text
+/api/v1/phase2
+```
+
+## 13.1 R-01 API
+
+### GET `/candidates/R-01`
+
+取得R-01基本資料及第一階段銜接資訊。
+
+### POST `/candidates/R-01/generate-baseline`
+
+產生Scenario 0現況資料。
+
+輸入：
+
+```json
+{
+  "seed": 42,
+  "force_regenerate": false
+}
+```
+
+### GET `/candidates/R-01/layers`
+
+取得Scenario 0空間圖層清單。
+
+## 13.2 Scenario API
+
+### GET `/scenarios`
+
+取得Scenario 0、A、B、C定義。
+
+### GET `/scenarios/{scenario_id}`
+
+取得Scenario參數及最近一次執行結果。
+
+### POST `/scenarios/{scenario_id}/simulate`
+
+執行情境模擬。
+
+### POST `/scenarios/{scenario_id}/reset`
+
+恢復預設參數。
+
+### GET `/scenarios/{scenario_id}/geometry/{layer}`
+
+取得指定圖層GeoJSON。
+
+`layer`：
+
+- buildings
+- blocks
+- roads
+- parks
+- parking
+- pois
+
+### GET `/scenarios/{scenario_id}/kpis`
+
+取得14項KPI。
+
+### GET `/scenarios/{scenario_id}/audit`
+
+取得參數、假設、Seed及執行紀錄。
+
+## 13.3 比較API
+
+### POST `/compare`
+
+輸入：
+
+```json
+{
+  "baseline_scenario_id": "0",
+  "target_scenario_id": "B"
+}
+```
+
+輸出：
+
+- KPI差異。
+- 構面差異。
+- 幾何變更統計。
+- Trade-off資料。
+
+## 13.4 AI摘要API
+
+### POST `/decision-summary`
+
+輸入：
+
+```json
+{
+  "baseline_scenario_id": "0",
+  "target_scenario_id": "B",
+  "language": "zh-TW"
+}
+```
+
+後端自行組合AI輸入，前端不得直接傳入任意KPI數值。
+
+## 13.5 匯出API
+
+### GET `/export/scenario/{scenario_id}.json`
+
+### GET `/export/scenario/{scenario_id}/buildings.geojson`
+
+### GET `/export/scenario/{scenario_id}/blocks.geojson`
+
+### GET `/export/scenario/{scenario_id}/roads.geojson`
+
+### GET `/export/scenario/{scenario_id}/facilities.geojson`
+
+### GET `/export/scenario/{scenario_id}/kpis.csv`
+
+### GET `/export/comparison/{baseline}/{target}.json`
+
+## 13.6 系統API
+
+### GET `/health`
+
+### GET `/config`
+
+### GET `/data-version`
+
+---
+
+# 14. GeoJSON及Scenario JSON結構
+
+## 14.1 共通GeoJSON Metadata
+
+```json
+{
+  "type": "FeatureCollection",
+  "name": "r01_scenario_b_buildings",
+  "metadata": {
+    "candidate_id": "R-01",
+    "scenario_id": "B",
+    "run_id": "RUN_B_001",
+    "seed": 42,
+    "data_type": "synthetic",
+    "crs_analysis": "EPSG:3826",
+    "crs_output": "EPSG:4326",
+    "generated_at": "ISO-8601"
+  },
+  "features": []
+}
+```
+
+## 14.2 Building Feature
+
+```json
+{
+  "type": "Feature",
+  "id": "BLDG_B_001",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": []
+  },
+  "properties": {
+    "building_id": "BLDG_B_001",
+    "block_id": "BLOCK_01",
+    "scenario_id": "B",
+    "change_type": "new",
+    "use_type": "residential",
+    "floors": 12,
+    "height_m": 38.4,
+    "dwelling_units": 48,
+    "residents": 115,
+    "parking_spaces": 50
+  }
+}
+```
+
+## 14.3 Scenario JSON
+
+```json
+{
+  "scenario_id": "B",
+  "scenario_name": "韌性導向更新",
+  "candidate_id": "R-01",
+  "base_scenario_id": "0",
+  "seed": 42,
+  "version": "0.1.0",
+  "parameters": {
+    "selected_block_ratio": 0.5,
+    "park_area_ratio": 0.15,
+    "green_coverage_target": 0.4,
+    "permeable_ratio_target": 0.45,
+    "emergency_road_min_width_m": 8
+  },
+  "assumption_log": [
+    {
+      "key": "park_area_ratio",
+      "value": 0.15,
+      "reason": "POC default"
+    }
+  ],
+  "run": {
+    "run_id": "RUN_B_001",
+    "parameter_hash": "sha256...",
+    "created_at": "ISO-8601"
+  },
+  "outputs": {
+    "geometry_files": {},
+    "kpi_file": "kpis.csv",
+    "summary_file": "decision_summary.json"
+  }
+}
+```
+
+---
+
+# 15. 系統資料夾調整
+
+在第一階段專案下新增：
+
+```text
+hsinchu-resilience-poc/
+├── AGENTS.md
+├── docs/
+│   ├── PHASE2_SYSTEM_SPEC.md
+│   ├── phase2-kpi-formulas.md
+│   └── phase2-demo-script.md
+├── data/
+│   ├── phase2/
+│   │   ├── input/
+│   │   │   └── r01_candidate.geojson
+│   │   ├── baseline/
+│   │   │   ├── buildings.geojson
+│   │   │   ├── blocks.geojson
+│   │   │   ├── roads.geojson
+│   │   │   ├── parks.geojson
+│   │   │   ├── parking.geojson
+│   │   │   ├── pois.geojson
+│   │   │   └── kpis.csv
+│   │   ├── scenarios/
+│   │   │   ├── scenario_0.json
+│   │   │   ├── scenario_a.json
+│   │   │   ├── scenario_b.json
+│   │   │   └── scenario_c.json
+│   │   └── runs/
+│   │       └── .gitkeep
+├── backend/
+│   ├── app/
+│   │   ├── api/
+│   │   │   └── phase2/
+│   │   │       ├── candidate.py
+│   │   │       ├── scenarios.py
+│   │   │       ├── compare.py
+│   │   │       ├── summary.py
+│   │   │       └── export.py
+│   │   ├── models/
+│   │   │   └── phase2/
+│   │   ├── schemas/
+│   │   │   └── phase2/
+│   │   └── services/
+│   │       └── phase2/
+│   │           ├── baseline_generator.py
+│   │           ├── scenario_engine.py
+│   │           ├── geometry_service.py
+│   │           ├── kpi_service.py
+│   │           ├── comparison_service.py
+│   │           ├── decision_summary_service.py
+│   │           └── audit_service.py
+│   ├── scripts/
+│   │   └── phase2/
+│   │       ├── generate_r01.py
+│   │       └── simulate_scenarios.py
+│   └── tests/
+│       └── phase2/
+│           ├── test_baseline_generator.py
+│           ├── test_kpis.py
+│           ├── test_scenarios.py
+│           ├── test_comparison.py
+│           └── test_phase2_api.py
+└── frontend/
+    └── src/
+        ├── pages/
+        │   └── Phase2SimulationPage.tsx
+        ├── components/
+        │   └── phase2/
+        │       ├── ScenarioSelector.tsx
+        │       ├── ScenarioParameterPanel.tsx
+        │       ├── R01Map2D.tsx
+        │       ├── R01Map3D.tsx
+        │       ├── KpiCards.tsx
+        │       ├── KpiComparisonChart.tsx
+        │       ├── ScenarioCompareView.tsx
+        │       ├── DecisionSummaryPanel.tsx
+        │       └── ExportPanel.tsx
+        ├── services/
+        │   └── phase2Api.ts
+        ├── stores/
+        │   └── phase2Store.ts
+        └── types/
+            └── phase2.ts
+```
+
+---
+
+# 16. Codex開發工作拆解
+
+建議分為10個可獨立驗收工作。
+
+## Work 1｜Phase 2骨架與第一階段銜接
+
+- 新增Phase 2路由。
+- 建立R-01入口。
+- 讀取candidate_areas.geojson。
+- 建立Pydantic Schema。
+
+## Work 2｜R-01現況幾何生成器
+
+- 產生道路。
+- 切分街廓。
+- 產生建物。
+- 產生公園、停車、POI。
+- 固定Seed。
+
+## Work 3｜Scenario 0與KPI引擎
+
+- 建立現況Scenario JSON。
+- 計算14項KPI。
+- 建立KPI單元測試。
+
+## Work 4｜Scenario A
+
+- 建立住宅導向參數。
+- 更新建物與停車。
+- 重算KPI。
+
+## Work 5｜Scenario B
+
+- 建立公園、避難、綠覆、消防改善規則。
+- 新增服務POI。
+- 重算KPI。
+
+## Work 6｜Scenario C
+
+- 建立混合使用、商業、人行、公車、自行車及共享停車規則。
+- 重算KPI。
+
+## Work 7｜Phase 2後端API與比較
+
+- Scenario查詢。
+- 模擬執行。
+- GeoJSON輸出。
+- KPI比較。
+- Audit Trail。
+
+## Work 8｜2D圖台與KPI介面
+
+- 顯示R-01圖層。
+- Scenario切換。
+- KPI卡片與圖表。
+- 參數控制面板。
+
+## Work 9｜LOD1與前後比較
+
+- 2D／2.5D切換。
+- 建物擠出。
+- 並排比較。
+- 新增、拆除、保留樣式。
+
+## Work 10｜AI摘要、匯出、測試與Demo
+
+- 結構化AI輸入。
+- 規則式Fallback摘要。
+- Scenario、GeoJSON、KPI匯出。
+- 整合測試。
+- Demo資料與操作腳本。
+
+## Codex執行規則
+
+每次只執行一個Work，並要求：
+
+1. 列出修改檔案。
+2. 不改動無關模組。
+3. 不在前端複製KPI公式。
+4. 提供執行與測試指令。
+5. 測試通過後才進入下一Work。
+6. 保留Synthetic Data警語。
+
+---
+
+# 17. 每項工作驗收條件
+
+| Work | 驗收條件 |
+|---|---|
+| 1 | 可由Phase 1點擊R-01進入Phase 2；後端可讀取R-01資料 |
+| 2 | 固定Seed可產生4～8街廓、50～150建物及完整設施圖層 |
+| 3 | Scenario 0可輸出14項KPI；所有公式有單元測試 |
+| 4 | Scenario A可增加住宅戶數與地下停車，並保留參數紀錄 |
+| 5 | Scenario B可提升綠覆、開放空間、避難及消防KPI |
+| 6 | Scenario C可提升公共運輸、步行與商業活力KPI |
+| 7 | API可執行模擬、查詢結果、比較情境與取得Audit Trail |
+| 8 | 2D圖台可切換四情境，KPI卡與圖表同步更新 |
+| 9 | LOD1高度與後端資料一致，前後比較可辨識新增、拆除與保留建物 |
+| 10 | AI摘要只使用計算結果；所有匯出可下載；測試全部通過 |
+
+---
+
+# 18. 單元測試與整合測試案例
+
+## 18.1 幾何生成測試
+
+### TC-GEO-001 固定Seed
+
+相同R-01與Seed執行兩次。
+
+預期：
+
+- Feature數量相同。
+- Feature ID相同。
+- Geometry Hash相同。
+
+### TC-GEO-002 建物位於街廓內
+
+預期：
+
+- 每棟建物均被所屬街廓包含。
+- 建物不得跨越道路中心線。
+
+### TC-GEO-003 數量範圍
+
+預期：
+
+- 街廓4～8個。
+- 建物50～150棟。
+
+## 18.2 KPI測試
+
+### TC-KPI-001 常住人口
+
+人工建立2棟建物，人口分別100與150。
+
+預期：250。
+
+### TC-KPI-002 停車供需差
+
+供給300、需求350。
+
+預期：-50。
+
+### TC-KPI-003 綠覆率
+
+綠地20,000平方公尺、R-01面積100,000平方公尺。
+
+預期：20%。
+
+### TC-KPI-004 公園服務人口不重複
+
+同一建物同時位於兩公園服務範圍。
+
+預期：人口只計一次。
+
+### TC-KPI-005 Baseline為0
+
+百分比差異應為null，不得除以0。
+
+## 18.3 Scenario測試
+
+### TC-SCN-A-001
+
+Scenario A住宅樓層提高。
+
+預期：
+
+- 住宅樓地板增加。
+- 戶數不低於Scenario 0。
+
+### TC-SCN-B-001
+
+增加公園比例。
+
+預期：
+
+- 綠覆率提高。
+- 公園服務人口不降低。
+
+### TC-SCN-C-001
+
+新增公車站與自行車設施。
+
+預期：
+
+- 公共運輸可及性提高。
+- 步行可及性不降低。
+
+## 18.4 API整合測試
+
+### TC-API-201
+
+執行Scenario B模擬。
+
+預期：
+
+- HTTP 200。
+- 回傳run_id。
+- 可查到KPI與GeoJSON。
+
+### TC-API-202
+
+傳入超出範圍參數。
+
+預期：HTTP 422。
+
+### TC-API-203
+
+比較Scenario 0與B。
+
+預期：
+
+- 14項KPI均含baseline、target、delta。
+- 幾何差異統計存在。
+
+## 18.5 前端整合測試
+
+### TC-UI-201
+
+由第一階段點擊R-01。
+
+預期：進入Phase 2並載入Scenario 0。
+
+### TC-UI-202
+
+切換Scenario A、B、C。
+
+預期：地圖、LOD1與KPI同步更新。
+
+### TC-UI-203
+
+調整參數並重新計算。
+
+預期：顯示Loading，完成後更新run_id與KPI。
+
+### TC-UI-204
+
+AI服務失敗。
+
+預期：顯示規則式Fallback摘要。
+
+### TC-UI-205
+
+後端失敗。
+
+預期：顯示錯誤訊息，不白屏。
+
+---
+
+# 19. Demo操作劇本
+
+建議Demo時間8～10分鐘。
+
+## Step 1｜第一階段進入R-01
+
+說明：
+
+- 第一階段已找出低健康度、高更新潛力候選區。
+- 點擊R-01進入都市更新情境模擬。
+
+## Step 2｜查看Scenario 0現況
+
+操作：
+
+- 顯示現況建物、街廓、道路、公園、停車及POI。
+- 切換2D與LOD1。
+- 點擊老舊建物查看屬性。
+
+說明：
+
+- 所有資料為依規則生成的Synthetic Data。
+
+## Step 3｜查看現況KPI
+
+操作：
+
+- 展示14項KPI。
+- 指出建物老舊、停車缺口、綠覆不足與消防可及性偏低。
+
+## Step 4｜切換Scenario A
+
+操作：
+
+- 顯示中高層住宅與地下停車。
+- 查看住宅戶數、常住人口及停車供需變化。
+
+說明：
+
+- 住宅供給增加，但公園與防災改善較有限。
+
+## Step 5｜切換Scenario B
+
+操作：
+
+- 顯示公園、防災廣場、綠化與消防通道。
+- 展示綠覆率、避難服務人口及消防可及性變化。
+
+## Step 6｜切換Scenario C
+
+操作：
+
+- 顯示混合使用、人行、自行車、公車及共享停車。
+- 展示日間人口、公共運輸、步行及商業活力變化。
+
+## Step 7｜調整參數
+
+操作：
+
+- 在Scenario B提高公園比例或綠覆目標。
+- 點擊重新計算。
+- 展示KPI及LOD1同步變化。
+
+## Step 8｜前後比較
+
+操作：
+
+- 選擇Scenario 0與B。
+- 顯示KPI差異表及前後場景。
+
+## Step 9｜AI Decision Summary
+
+說明：
+
+- AI只接收後端已計算數值。
+- AI負責整理改善與取捨，不負責創造KPI。
+
+## Step 10｜匯出
+
+操作：
+
+- 匯出Scenario JSON。
+- 匯出GeoJSON。
+- 匯出KPI CSV。
+
+結尾警語：
+
+- 本系統為POC。
+- 結果不代表真實新竹市現況。
+- 不作為正式都市更新政策判定。
+
+---
+
+# 20. 已知限制
+
+## 20.1 資料限制
+
+1. R-01現況資料為Synthetic Data。
+2. 建物、道路、人口、停車與設施不代表真實位置與數量。
+3. 不包含土地權利、地籍、都市計畫及產權資訊。
+4. 不得用於辨識真實社區或居民。
+
+## 20.2 模型限制
+
+1. 情境由規則式參數產生，不是都市設計方案。
+2. KPI公式為POC簡化公式，未經完整專家驗證。
+3. 人口、交通與商業活動使用靜態估算。
+4. 各KPI間可能存在簡化或重複影響。
+5. 更新機會分數不是法定都市更新可行性。
+
+## 20.3 空間限制
+
+1. 建物僅為LOD1擠出體。
+2. 不處理日照、風場、景觀、地形與地下設施。
+3. 不處理道路容量、號誌或動態交通流。
+4. 避難與消防僅採距離、道路寬度及服務容量近似。
+5. 公園與POI服務範圍採簡化直線距離，不是路網分析。
+
+## 20.4 系統限制
+
+1. 僅支援R-01單一候選區。
+2. 不支援多人協作與正式權限管理。
+3. 不使用正式資料庫亦可完成POC。
+4. 不提供正式版本控管、審批或政策簽核流程。
+5. AI服務可用規則式摘要替代。
+6. 2.5D效能以150棟建物內為目標。
+
+## 20.5 必要警語
+
+所有主要畫面、AI摘要與匯出結果均須顯示：
+
+```text
+本功能為都市更新情境概念驗證，使用合成資料與規則模型計算。
+結果不代表R-01或新竹市真實現況，亦不得作為正式都市更新、建築設計、工程或政策判定依據。
+```

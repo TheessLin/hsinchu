@@ -1,0 +1,42 @@
+{
+  "type": "FeatureCollection",
+  "name": "hsinchu_city_study_boundary_simplified",
+  "crs": {
+    "type": "name",
+    "properties": {
+      "name": "EPSG:4326"
+    }
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Hsinchu City Study Boundary",
+        "source": "Simplified synthetic POC boundary",
+        "disclaimer": "This simplified study boundary is for simulation and proof-of-concept use only."
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [120.904, 24.865],
+            [120.937, 24.861],
+            [120.965, 24.858],
+            [120.996, 24.848],
+            [121.034, 24.825],
+            [121.044, 24.793],
+            [121.02, 24.766],
+            [120.979, 24.746],
+            [120.934, 24.732],
+            [120.892, 24.739],
+            [120.861, 24.77],
+            [120.846, 24.807],
+            [120.865, 24.84],
+            [120.904, 24.865]
+          ]
+        ]
+      }
+    }
+  ]
+}
+
