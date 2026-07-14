@@ -16,6 +16,16 @@ from app.renewal_current import (
     get_r01_facilities_geojson,
     get_r01_roads_geojson,
 )
+from app.renewal_exports import (
+    get_r01_comparison_with_rankings,
+    get_r01_decision_summary_export,
+    get_r01_scenario_export,
+    get_r01_scenario_kpi_csv,
+    get_r01_scenario_layer_geojson,
+)
+from app.renewal_kpis import build_r01_scenario_kpis, get_r01_scenario_kpis
+from app.renewal_scenarios import ScenarioRunRequest, list_r01_scenarios, get_r01_scenario, normalize_scenario_id, run_r01_scenario
+from app.renewal_summary import build_r01_decision_summary, get_r01_recommendation, get_r01_scenario_summary
 from app.simulation import generate_and_store_simulation, get_simulation_grid, get_simulation_records, get_simulation_state
 
 API_PREFIX = "/api/v1"
@@ -192,6 +202,104 @@ def create_app() -> FastAPI:
     @app.get(f"{API_PREFIX}/renewal/R-01/facilities")
     def r01_facilities() -> dict[str, Any]:
         return get_r01_facilities_geojson()
+
+    @app.get("/api/renewal/R-01/scenarios")
+    @app.get(f"{API_PREFIX}/renewal/R-01/scenarios")
+    def r01_scenarios() -> dict[str, Any]:
+        return list_r01_scenarios()
+
+    @app.get("/api/renewal/R-01/scenarios/{scenario_id}")
+    @app.get(f"{API_PREFIX}/renewal/R-01/scenarios/{{scenario_id}}")
+    def r01_scenario(scenario_id: str) -> dict[str, Any]:
+        scenario = get_r01_scenario(scenario_id)
+        if scenario is None:
+            raise HTTPException(status_code=404, detail=f"Scenario not found: {scenario_id}")
+        return scenario
+
+    @app.post("/api/renewal/R-01/scenarios/{scenario_id}/run")
+    @app.post(f"{API_PREFIX}/renewal/R-01/scenarios/{{scenario_id}}/run")
+    def run_r01_scenario_api(scenario_id: str, request: ScenarioRunRequest | None = None) -> dict[str, Any]:
+        normalized = normalize_scenario_id(scenario_id)
+        if normalized is None:
+            raise HTTPException(status_code=404, detail=f"Scenario not found: {scenario_id}")
+        return run_r01_scenario(normalized, request or ScenarioRunRequest())
+
+    @app.post("/api/renewal/R-01/scenarios/{scenario_id}/run-kpis")
+    @app.post(f"{API_PREFIX}/renewal/R-01/scenarios/{{scenario_id}}/run-kpis")
+    def run_r01_scenario_kpis_api(scenario_id: str, request: ScenarioRunRequest | None = None) -> dict[str, Any]:
+        normalized = normalize_scenario_id(scenario_id)
+        if normalized is None:
+            raise HTTPException(status_code=404, detail=f"Scenario not found: {scenario_id}")
+        scenario = run_r01_scenario(normalized, request or ScenarioRunRequest())
+        kpis = build_r01_scenario_kpis(scenario)
+        if kpis is None:
+            raise HTTPException(status_code=500, detail=f"Scenario KPIs could not be calculated: {scenario_id}")
+        summary = build_r01_decision_summary(scenario, kpis)
+        if summary is None:
+            raise HTTPException(status_code=500, detail=f"Scenario summary could not be calculated: {scenario_id}")
+        return {"scenario": scenario, "kpis": kpis, "summary": summary}
+
+    @app.get("/api/renewal/R-01/scenarios/{scenario_id}/kpis")
+    @app.get(f"{API_PREFIX}/renewal/R-01/scenarios/{{scenario_id}}/kpis")
+    def r01_scenario_kpis(scenario_id: str) -> dict[str, Any]:
+        payload = get_r01_scenario_kpis(scenario_id)
+        if payload is None:
+            raise HTTPException(status_code=404, detail=f"Scenario not found: {scenario_id}")
+        return payload
+
+    @app.get("/api/renewal/R-01/comparison")
+    @app.get(f"{API_PREFIX}/renewal/R-01/comparison")
+    def r01_scenario_comparison() -> dict[str, Any]:
+        return get_r01_comparison_with_rankings()
+
+    @app.get("/api/renewal/R-01/scenarios/{scenario_id}/summary")
+    @app.get(f"{API_PREFIX}/renewal/R-01/scenarios/{{scenario_id}}/summary")
+    def r01_scenario_summary(scenario_id: str) -> dict[str, Any]:
+        summary = get_r01_scenario_summary(scenario_id)
+        if summary is None:
+            raise HTTPException(status_code=404, detail=f"Scenario not found: {scenario_id}")
+        return summary
+
+    @app.get("/api/renewal/R-01/recommendation")
+    @app.get(f"{API_PREFIX}/renewal/R-01/recommendation")
+    def r01_recommendation() -> dict[str, Any]:
+        return get_r01_recommendation()
+
+    @app.get("/api/renewal/R-01/export/scenarios/{scenario_id}.json")
+    @app.get(f"{API_PREFIX}/renewal/R-01/export/scenarios/{{scenario_id}}.json")
+    def export_r01_scenario_json(scenario_id: str) -> dict[str, Any]:
+        payload = get_r01_scenario_export(scenario_id)
+        if payload is None:
+            raise HTTPException(status_code=404, detail=f"Scenario not found: {scenario_id}")
+        return payload
+
+    @app.get("/api/renewal/R-01/export/scenarios/{scenario_id}/{layer}.geojson")
+    @app.get(f"{API_PREFIX}/renewal/R-01/export/scenarios/{{scenario_id}}/{{layer}}.geojson")
+    def export_r01_scenario_layer_geojson(scenario_id: str, layer: str) -> dict[str, Any]:
+        payload = get_r01_scenario_layer_geojson(scenario_id, layer)
+        if payload is None:
+            raise HTTPException(status_code=404, detail=f"Scenario layer not found: {scenario_id}/{layer}")
+        return payload
+
+    @app.get("/api/renewal/R-01/export/scenarios/{scenario_id}/kpis.csv")
+    @app.get(f"{API_PREFIX}/renewal/R-01/export/scenarios/{{scenario_id}}/kpis.csv")
+    def export_r01_scenario_kpi_csv(scenario_id: str) -> Response:
+        payload = get_r01_scenario_kpi_csv(scenario_id)
+        if payload is None:
+            raise HTTPException(status_code=404, detail=f"Scenario not found: {scenario_id}")
+        return Response(
+            content=payload,
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="r01_scenario_{scenario_id.upper()}_kpis.csv"'},
+        )
+
+    @app.get("/api/renewal/R-01/export/scenarios/{scenario_id}/decision-summary.json")
+    @app.get(f"{API_PREFIX}/renewal/R-01/export/scenarios/{{scenario_id}}/decision-summary.json")
+    def export_r01_decision_summary_json(scenario_id: str) -> dict[str, Any]:
+        payload = get_r01_decision_summary_export(scenario_id)
+        if payload is None:
+            raise HTTPException(status_code=404, detail=f"Scenario not found: {scenario_id}")
+        return payload
 
     @app.get("/api/export/grids.geojson")
     @app.get(f"{API_PREFIX}/export/grids.geojson")

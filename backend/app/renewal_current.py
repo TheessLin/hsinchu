@@ -5,6 +5,7 @@ from typing import Any
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 from shapely.geometry import LineString, MultiLineString, Point, Polygon, box, mapping
 from shapely.geometry.base import BaseGeometry
 
@@ -14,6 +15,7 @@ from app.simulation import get_simulation_state
 
 CURRENT_YEAR = 2026
 R01_CANDIDATE_ID = "R-01"
+_current_data_cache: dict[tuple[tuple[str, float | int], ...], RenewalCurrentData] = {}
 
 
 @dataclass(frozen=True)
@@ -27,7 +29,14 @@ class RenewalCurrentData:
 
 def get_r01_current_data() -> RenewalCurrentData:
     state = get_simulation_state()
-    return generate_r01_current_data(seed=state.seed)
+    cache_key = tuple(sorted(state.parameters.as_dict().items()))
+    if cache_key not in _current_data_cache:
+        _current_data_cache[cache_key] = generate_r01_current_data(seed=state.seed)
+    return _current_data_cache[cache_key]
+
+
+def clear_r01_current_data_cache() -> None:
+    _current_data_cache.clear()
 
 
 def generate_r01_current_data(seed: int = 42) -> RenewalCurrentData:
@@ -81,10 +90,7 @@ def to_feature_collection(frame: gpd.GeoDataFrame, seed: int, layer: str) -> dic
     output = frame.to_crs(BASE_CRS)
     features: list[dict[str, Any]] = []
     for _, row in output.iterrows():
-        properties = {
-            key: value.item() if hasattr(value, "item") else value
-            for key, value in row.drop(labels=["geometry"]).to_dict().items()
-        }
+        properties = {key: _json_property_value(value) for key, value in row.drop(labels=["geometry"]).to_dict().items()}
         features.append(
             {
                 "type": "Feature",
@@ -104,6 +110,12 @@ def to_feature_collection(frame: gpd.GeoDataFrame, seed: int, layer: str) -> dic
         },
         "features": features,
     }
+
+
+def _json_property_value(value: Any) -> Any:
+    if pd.isna(value):
+        return None
+    return value.item() if hasattr(value, "item") else value
 
 
 def _generate_blocks(grid_ids: list[str], rng: np.random.Generator) -> gpd.GeoDataFrame:

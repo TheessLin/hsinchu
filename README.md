@@ -1,8 +1,8 @@
 # Hsinchu Urban Resilience Health Simulation POC
 
-Interactive web GIS proof of concept for visualizing simulated urban resilience health scores in Hsinchu City.
+新竹市都市韌性與 R-01 都市更新 Scenario 模擬概念驗證系統。系統使用合成資料呈現第一階段城市網格韌性分析，以及第二階段 R-01 小範圍都市更新方案比較。
 
-This repository currently contains the project scaffold, user-provided Hsinchu City district boundaries, backend-generated 500m analysis grids, a rule-based synthetic data engine, and an OpenLayers grid viewer. Resilience scoring, rankings, and export logic are intentionally not implemented yet.
+> 本系統使用 POC 模擬資料，不得作為正式政策判斷、真實都市更新結論或法定審議依據。
 
 ## Stack
 
@@ -14,6 +14,7 @@ Frontend:
 * OpenLayers
 * ECharts
 * Tailwind CSS
+* Three.js for Phase 2 LOD1 extrusion
 
 Backend:
 
@@ -25,35 +26,31 @@ Backend:
 * NumPy
 * Shapely
 
-## Project Structure
+## Architecture
 
 ```text
-hsinchu-urban-resilience-poc/
-|-- backend/
-|   |-- app/
-|   |   |-- __init__.py
-|   |   |-- grids.py
-|   |   |-- simulation.py
-|   |   `-- main.py
-|   `-- requirements.txt
-|-- data/
-|   `-- base/
-|       |-- hsinchu_city_administrative_boundary.geojson
-|       |-- hsinchu_city_district_boundaries.geojson
-|       `-- hsinchu_city_study_boundary.geojson
-|-- frontend/
-|   |-- src/
-|   |   |-- App.tsx
-|   |   |-- main.tsx
-|   |   `-- styles.css
-|   |-- package.json
-|   `-- vite.config.ts
-|-- docs/
-|-- scripts/
-`-- tests/
+frontend/
+  src/App.tsx                    Phase 1 dashboard and R-01 navigation
+  src/RenewalCandidatePage.tsx   Phase 2 Scenario UI, 2D/3D map, KPI, AI summary, export
+  src/api.ts                     Runtime API calls and GitHub Pages static-demo routing
+
+backend/app/
+  main.py                        FastAPI routes
+  grids.py                       Hsinchu boundary and 500m grid generation
+  simulation.py                  deterministic Phase 1 synthetic data engine
+  resilience.py                  Phase 1 resilience scoring
+  candidates.py                  renewal candidate clustering and ranking
+  phase2.py                      Phase 1 to Phase 2 R-01 handoff
+  renewal_current.py             R-01 current-condition synthetic generator
+  renewal_scenarios.py           Scenario 0/A/B/C parameterized engine
+  renewal_kpis.py                Scenario KPI service and comparison
+  renewal_summary.py             rule-based AI Decision Summary provider
+  renewal_exports.py             Phase 2 ranking and export service
 ```
 
-## Backend Setup
+All scoring, KPI, ranking, Scenario, export, and summary evidence values are produced by the backend. The frontend displays results and sends Scenario parameters only after the user clicks `重新模擬`.
+
+## Install
 
 From the repository root:
 
@@ -65,159 +62,124 @@ python -m pip install --upgrade pip
 python -m pip install -r backend\requirements.txt
 ```
 
-Start the API:
-
-```powershell
-python -m uvicorn app.main:app --app-dir backend --reload --host 127.0.0.1 --port 8000
-```
-
-Health check:
-
-```text
-GET http://127.0.0.1:8000/api/v1/health
-```
-
-Expected response:
-
-```json
-{
-  "status": "ok",
-  "service": "hsinchu-resilience-api",
-  "version": "0.1.0"
-}
-```
-
-Grid and boundary APIs:
-
-```text
-GET http://127.0.0.1:8000/api/boundary
-GET http://127.0.0.1:8000/api/grids
-```
-
-Both endpoints return GeoJSON `FeatureCollection` responses. The boundary API returns the three Hsinchu City districts: `北區`, `東區`, and `香山區`. The grid API returns 500m x 500m analysis cells that intersect the city boundary union. Each grid feature includes `grid_id`, `centroid_x`, `centroid_y`, `district_type`, and `land_use_type`.
-
-Simulation APIs:
-
-```text
-POST http://127.0.0.1:8000/api/simulation/generate
-GET  http://127.0.0.1:8000/api/simulation/data
-GET  http://127.0.0.1:8000/api/simulation/grid/{grid_id}
-```
-
-Generate request body:
-
-```json
-{
-  "seed": 42
-}
-```
-
-The simulation engine is deterministic for a fixed seed. It generates rule-based synthetic values from distance to the simulated urban core, district type, land-use type, density, accessibility, open-space, and limited seeded variation.
-
-Resilience scoring APIs:
-
-```text
-GET http://127.0.0.1:8000/api/resilience
-GET http://127.0.0.1:8000/api/resilience/{grid_id}
-```
-
-The scoring engine returns six dimension scores, a weighted `resilience_score`, and `score_details` for each dimension. High scores mean better resilience health. The original `renewal_potential` value is preserved as a renewal pressure indicator, while `renewal_potential_score` is the inverse resilience-health score used in the weighted total.
-
-## Frontend Setup
-
-In a second terminal:
+Frontend:
 
 ```powershell
 cd D:\forclaude\hsinchu-urban-resilience-poc\frontend
 pnpm install
+```
+
+## Start Locally
+
+Terminal 1:
+
+```powershell
+cd D:\forclaude\hsinchu-urban-resilience-poc\backend
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+Terminal 2:
+
+```powershell
+cd D:\forclaude\hsinchu-urban-resilience-poc\frontend
 pnpm dev
 ```
 
 Open:
 
 ```text
-http://127.0.0.1:5173
+http://127.0.0.1:5173/
 ```
 
-The Vite dev server proxies `/api` requests to `http://127.0.0.1:8000`.
+## Main APIs
+
+Health:
+
+```text
+GET /api/v1/health
+```
+
+Phase 1:
+
+```text
+GET  /api/boundary
+GET  /api/grids
+POST /api/simulation/generate
+GET  /api/resilience
+GET  /api/candidates
+GET  /api/export/grids.geojson
+GET  /api/export/indicators.csv
+GET  /api/export/candidates.geojson
+```
+
+Phase 2 R-01:
+
+```text
+GET  /api/v1/phase2/candidates/R-01
+GET  /api/renewal/R-01/current
+GET  /api/renewal/R-01/scenarios
+GET  /api/renewal/R-01/scenarios/{scenario_id}
+POST /api/renewal/R-01/scenarios/{scenario_id}/run
+POST /api/renewal/R-01/scenarios/{scenario_id}/run-kpis
+GET  /api/renewal/R-01/scenarios/{scenario_id}/kpis
+GET  /api/renewal/R-01/comparison
+GET  /api/renewal/R-01/scenarios/{scenario_id}/summary
+GET  /api/renewal/R-01/recommendation
+```
+
+Phase 2 export:
+
+```text
+GET /api/renewal/R-01/export/scenarios/{scenario_id}.json
+GET /api/renewal/R-01/export/scenarios/{scenario_id}/buildings.geojson
+GET /api/renewal/R-01/export/scenarios/{scenario_id}/roads.geojson
+GET /api/renewal/R-01/export/scenarios/{scenario_id}/facilities.geojson
+GET /api/renewal/R-01/export/scenarios/{scenario_id}/kpis.csv
+GET /api/renewal/R-01/export/scenarios/{scenario_id}/decision-summary.json
+```
+
+`scenario_id` supports `0`, `A`, `B`, and `C`.
 
 ## GitHub Pages Static Demo
 
-GitHub Pages can host only static frontend files. It cannot run the FastAPI backend. This project therefore supports a static demo mode for sharing:
-
-* backend-generated data is exported to `frontend/public/demo-data`
-* the frontend reads those JSON and GeoJSON files when `VITE_STATIC_DEMO=1`
-* local development still uses the FastAPI `/api` endpoints
-
-Generate static demo data:
+GitHub Pages cannot run FastAPI, so the project exports a static snapshot into `frontend/public/demo-data`.
 
 ```powershell
 cd D:\forclaude\hsinchu-urban-resilience-poc
 python scripts\export_static_demo.py
-```
 
-Build the Pages version locally:
-
-```powershell
-cd D:\forclaude\hsinchu-urban-resilience-poc\frontend
+cd frontend
 $env:VITE_STATIC_DEMO="1"
 $env:VITE_BASE_PATH="/"
 pnpm build
 pnpm preview
 ```
 
-Deploy to GitHub Pages:
+Static demo limitations:
 
-1. Push this repository to GitHub on the `main` branch.
-2. In GitHub, open **Settings > Pages**.
-3. Set the Pages source to **GitHub Actions**.
-4. The workflow at `.github/workflows/deploy-pages.yml` will build and deploy the static demo.
-
-Known static-demo limits:
-
-* The shared Pages site is a fixed snapshot generated from seed `42`.
-* The "重新模擬" button reloads the static snapshot instead of recalculating on a backend.
-* Exports and future scenario simulation features need either static-file equivalents or a hosted backend.
+* The Pages version is a fixed snapshot generated from the selected seed.
+* `重新模擬` returns static pre-exported Scenario results instead of running a backend.
+* No external API is called at runtime.
 
 ## Tests
 
-Run backend tests from the repository root:
+Backend:
 
 ```powershell
+cd D:\forclaude\hsinchu-urban-resilience-poc
 pytest
 ```
 
-Run frontend build checks:
+Frontend build check:
 
 ```powershell
 cd D:\forclaude\hsinchu-urban-resilience-poc\frontend
 pnpm build
 ```
 
-## Current Scope
+## Known Limits
 
-Implemented:
-
-* FastAPI app factory
-* `/api/v1/health`
-* CORS for the local Vite frontend
-* User-provided local Hsinchu City district boundaries normalized to EPSG:4326
-* Backend-generated 500m analysis grids
-* `/api/boundary` and `/api/grids` GeoJSON APIs
-* Rule-based deterministic synthetic data engine
-* `/api/simulation/generate`, `/api/simulation/data`, and `/api/simulation/grid/{grid_id}` APIs
-* Urban resilience scoring engine with six dimension scores and calculation details
-* `/api/resilience` and `/api/resilience/{grid_id}` APIs
-* React + TypeScript + Vite frontend scaffold
-* Tailwind CSS setup
-* Interactive dashboard with OpenLayers thematic grid rendering
-* Red-yellow-green resilience score map by selected dimension
-* Grid hover tooltip and click selection
-* Right-side grid diagnosis panel with radar chart, top issues, and indicator details
-* Bottom candidate ranking and dimension comparison chart
-* Visible simulated-data disclaimer
-* Basic backend tests
-
-Not implemented yet:
-
-* Analysis result GeoJSON and CSV export
+* All urban, building, road, facility, KPI, and AI summary values are synthetic POC values.
+* R-01 is a simulated candidate handoff from Phase 1; it must not be described as a real problem area.
+* 3D uses LOD1 extrusion only. No LOD2, facade texture, BIM, CFD, or real address data is included.
+* Objective ranking is based on backend-calculated KPI values and POC objective definitions, not an official policy evaluation.

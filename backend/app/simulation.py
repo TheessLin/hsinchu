@@ -414,6 +414,12 @@ def generate_and_store_simulation(
         disaster_risk_level=parameters.disaster_risk_level,
     )
     _simulation_state = SimulationState(seed=parameters.random_seed, parameters=parameters, frame=frame)
+    try:
+        from app.renewal_current import clear_r01_current_data_cache
+
+        clear_r01_current_data_cache()
+    except ImportError:
+        pass
     return _simulation_state
 
 

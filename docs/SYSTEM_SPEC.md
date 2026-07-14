@@ -231,6 +231,33 @@ POC階段僅設計兩種邏輯角色，不實作完整登入驗證。
 匯出CSV或GeoJSON
 ```
 
+---
+
+## Current Integrated Architecture
+
+The POC is implemented as two connected phases:
+
+1. Phase 1 dashboard
+   * Hsinchu City boundary and 500m grids.
+   * Deterministic synthetic indicators.
+   * Six resilience dimensions and composite score.
+   * Candidate renewal-area clustering and R-01 handoff.
+
+2. Phase 2 R-01 renewal simulation
+   * Current-condition synthetic blocks, buildings, roads and facilities.
+   * Scenario 0/A/B/C backend Scenario Engine.
+   * Backend KPI service and four-scenario comparison.
+   * Objective ranking by resilience, housing, parking, green/open space, transport, and disaster evacuation.
+   * Rule-based AI Decision Summary that uses calculated KPI records only.
+   * Scenario, GeoJSON, KPI CSV, and summary exports.
+
+Runtime rules:
+
+* No external API call is required during normal runtime.
+* No personal data or real address data is used.
+* All outputs are Synthetic Data and cannot be used as official policy conclusions.
+* Frontend renders and controls interaction; backend owns simulation, scoring, KPI, ranking, summary evidence, and export generation.
+
 ## 4.2 權重調整流程
 
 ```text
